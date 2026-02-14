@@ -6,225 +6,240 @@ import subprocess
 import time
 from pathlib import Path
 
-# --- 1. 页面基础配置 ---
+# --- 1. 页面配置 (必须在第一行) ---
 st.set_page_config(
-    page_title="LingOrm AI Subtitles",
+    page_title="LingOrm · The Secret Voice",
     page_icon="💜",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
 
-# --- 2. 高端 CSS 注入 (UI 美化) ---
+# --- 2. 🎨 高端 UI 注入 (CSS 魔法) ---
 st.markdown("""
 <style>
-    /* 引入 Kanit 字体 */
-    @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap');
+    /* 引入 Kanit 字体 (泰剧御用字体) */
+    @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@200;300;400;500;600&display=swap');
     
+    /* 全局重置 */
     html, body, [class*="css"] {
         font-family: 'Kanit', sans-serif;
+        color: #2D2D2D;
     }
 
-    /* 全局背景：柔和的紫色极光渐变 */
+    /* 🟣 背景：梦幻极光紫渐变 */
     .stApp {
-        background: linear-gradient(135deg, #fdfbfd 0%, #f3e7f5 100%);
+        background: radial-gradient(circle at 10% 20%, rgb(239, 235, 255) 0%, rgb(235, 225, 255) 90%);
+        background-attachment: fixed;
     }
 
-    /* 标题样式 */
-    h1 {
-        color: #4a148c;
-        font-weight: 600;
+    /* ✨ 标题：渐变流光字体 */
+    .lingorm-title {
+        background: linear-gradient(45deg, #6a11cb 0%, #2575fc 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-size: 3.5rem;
+        font-weight: 700;
         text-align: center;
-        letter-spacing: -1px;
+        letter-spacing: -2px;
+        margin-bottom: 0.5rem;
     }
     
-    /* 卡片容器样式 */
-    .css-card {
-        background-color: white;
-        padding: 2rem;
-        border-radius: 15px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-        margin-bottom: 20px;
-        border: 1px solid #f0f0f0;
+    .lingorm-subtitle {
+        text-align: center;
+        color: #888;
+        font-weight: 300;
+        letter-spacing: 1px;
+        margin-bottom: 2rem;
+        font-size: 1.1rem;
     }
 
-    /* 按钮美化 */
+    /* 🌫️ 毛玻璃卡片 (Glassmorphism) */
+    .glass-card {
+        background: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-radius: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+        padding: 30px;
+        margin-bottom: 25px;
+    }
+
+    /* 🟣 按钮：LingOrm 专属渐变紫 */
     .stButton>button {
-        background: linear-gradient(90deg, #7b1fa2, #9c27b0);
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
         border: none;
-        border-radius: 12px;
-        height: 50px;
+        border-radius: 15px;
+        height: 55px;
         font-size: 18px;
         font-weight: 500;
         width: 100%;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 6px rgba(123, 31, 162, 0.2);
+        transition: all 0.4s ease;
+        box-shadow: 0 4px 15px rgba(118, 75, 162, 0.3);
+        letter-spacing: 0.5px;
     }
 
     .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 7px 14px rgba(123, 31, 162, 0.3);
-        background: linear-gradient(90deg, #6a1b9a, #8e24aa);
+        transform: translateY(-3px) scale(1.01);
+        box-shadow: 0 10px 25px rgba(118, 75, 162, 0.5);
+        background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
     }
-    
-    /* 隐藏页脚 */
+
+    /* 输入框美化 */
+    .stTextInput>div>div>input {
+        border-radius: 12px;
+        border: 1px solid #E0E0E0;
+        background-color: rgba(255,255,255,0.8);
+        height: 45px;
+    }
+    .stTextInput>div>div>input:focus {
+        border-color: #764ba2;
+        box-shadow: 0 0 0 2px rgba(118, 75, 162, 0.2);
+    }
+
+    /* 进度条紫色 */
+    .stProgress > div > div > div > div {
+        background: linear-gradient(90deg, #667eea, #764ba2);
+    }
+
+    /* 隐藏杂项 */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    
+    header {visibility: hidden;}
+
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. 侧边栏 (设置) ---
-with st.sidebar:
-    st.markdown("### ⚙️ 核心设置")
-    api_key = st.text_input("Google API Key", type="password", help="必填项")
-    
-    st.markdown("---")
-    st.markdown("### 🎭 角色配置")
-    col1, col2 = st.columns(2)
-    with col1:
-        role_1 = st.text_input("泰名 A", value="LingLing")
-        role_1_cn = st.text_input("中译 A", value="Ling姐")
-    with col2:
-        role_2 = st.text_input("泰名 B", value="Orm")
-        role_2_cn = st.text_input("中译 B", value="Orm")
-    
-    st.markdown("### 🚫 过滤设置")
-    blacklist_input = st.text_area("屏蔽词", value="迪哥,妈妈达,迪桑达,条纹,时髦,鲁尼特", height=100)
-    blacklist = [x.strip() for x in blacklist_input.split(",") if x.strip()]
-    
-    st.info("💡 提示：侧边栏可收起，让主界面更清爽。")
-
-# --- 4. 核心逻辑函数 ---
+# --- 3. 逻辑核心 (保持最强双保险) ---
 
 def get_gemini_response(file, prompt):
-    """
-    智能模型调用：优先尝试 1.5 Pro，失败则降级到 Flash
-    """
+    """智能模型调用：Pro 优先，Flash 兜底"""
     try:
-        # 优先尝试 Pro 版 (质量最佳)
         model = genai.GenerativeModel("gemini-1.5-pro")
-        print("正在尝试使用 Gemini 1.5 Pro...")
         response = model.generate_content([file, prompt], request_options={"timeout": 600})
         return response
-    except Exception as e:
-        # 如果 Pro 失败 (如 404 或 配额不足)，自动切换到 Flash
-        st.warning(f"⚠️ Pro 模型繁忙，正在自动切换至极速版 (Flash)...")
-        print(f"Pro 模型错误: {e}")
-        try:
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content([file, prompt], request_options={"timeout": 600})
-            return response
-        except Exception as e2:
-            raise e2
+    except Exception:
+        st.toast("⚠️ Pro 线路繁忙，正在切换至极速通道...", icon="🚀")
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content([file, prompt], request_options={"timeout": 600})
+        return response
 
-# --- 5. 主界面设计 ---
+# --- 4. 侧边栏 (极简设计) ---
+with st.sidebar:
+    st.markdown("## ⚙️ Setting")
+    api_key = st.text_input("Google API Key", type="password")
+    
+    st.markdown("---")
+    st.markdown("### 🦋 Characters")
+    col1, col2 = st.columns(2)
+    with col1:
+        role_1 = st.text_input("Role A", value="LingLing")
+        role_1_cn = st.text_input("CN A", value="Ling姐")
+    with col2:
+        role_2 = st.text_input("Role B", value="Orm")
+        role_2_cn = st.text_input("CN B", value="Orm")
+        
+    st.markdown("### 🚫 Blacklist")
+    blacklist_str = st.text_area("", value="迪哥,妈妈达,迪桑达,条纹,时髦,鲁尼特", height=80)
+    blacklist = [x.strip() for x in blacklist_str.split(",") if x.strip()]
 
-# 头部 Logo 区
-st.markdown("<div style='text-align: center; margin-bottom: 30px;'>", unsafe_allow_html=True)
-st.title("💜 LingOrm 字幕工坊")
-st.markdown("<p style='color: #666; font-size: 1.1em;'>基于 Google Gemini 1.5 | 专为泰剧/CP 优化的 AI 翻译</p>", unsafe_allow_html=True)
-st.markdown("</div>", unsafe_allow_html=True)
+# --- 5. 主界面布局 ---
 
-# 核心功能区
-with st.container(border=True):
-    st.markdown("### 📂 第一步：上传视频/音频")
+# 头部 Logo 与 标题
+st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+st.markdown("<h1 class='lingorm-title'>LingOrm AI Subtitles</h1>", unsafe_allow_html=True)
+st.markdown("<p class='lingorm-subtitle'>Unlock the Secret of Their Voices · 我们的秘密</p>", unsafe_allow_html=True)
+
+# 毛玻璃容器 1: 上传区
+with st.container():
+    st.markdown("""
+    <div class='glass-card'>
+        <h4 style='color:#555; margin-bottom:15px;'>📂 Upload Video / Audio</h4>
+    </div>
+    """, unsafe_allow_html=True)
+    # Streamlit 的组件无法直接放入 HTML div 中，利用视觉欺骗，把uploader紧贴在上面的div下
     uploaded_file = st.file_uploader("", type=["mp4", "mov", "mkv", "mp3", "wav"], label_visibility="collapsed")
 
 if uploaded_file:
-    # 视频预览
-    with st.expander("📹 点击预览视频画面", expanded=False):
+    # 视频预览区
+    with st.expander("📹 Preview Video (点击展开)", expanded=False):
         st.video(uploaded_file)
     
-    st.write("") # 空行布局
-    
-    # 开始按钮
-    if st.button("✨ 开始魔法生成 (Generate)"):
+    st.write("") 
+
+    # 按钮区
+    if st.button("🔮 生成字幕 (Generate Magic)"):
         if not api_key:
-            st.error("🔒 请先在左侧侧边栏 (点击左上角 >) 输入 Google API Key")
+            st.error("🔒 Please enter your API Key in the sidebar.")
         else:
-            # --- 处理流程 ---
-            status_container = st.container(border=True)
-            with status_container:
-                st.markdown("#### 🚀 正在处理中...")
-                prog_bar = st.progress(0)
-                status_text = st.empty()
-                
-                # 创建临时文件
-                with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp_file:
-                    tmp_file.write(uploaded_file.read())
-                    tmp_video_path = tmp_file.name
-                
-                audio_path = None # 初始化变量
-                
-                try:
-                    # 1. 提取音频
-                    status_text.markdown("**正在从视频中提取人声...**")
-                    prog_bar.progress(20)
-                    
-                    audio_path = tmp_video_path.replace(Path(tmp_video_path).suffix, ".mp3")
-                    # FFmpeg 命令
-                    cmd = ["ffmpeg", "-i", tmp_video_path, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", "-y", audio_path]
-                    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # 进度显示区
+            status_container = st.empty()
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                tmp_video_path = tmp_file.name
+            
+            audio_path = None
+            
+            try:
+                # 步骤 1
+                status_container.info("🎧 Extracting Audio... (正在提取纯净人声)")
+                audio_path = tmp_video_path.replace(Path(tmp_video_path).suffix, ".mp3")
+                cmd = ["ffmpeg", "-i", tmp_video_path, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", "-y", audio_path]
+                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-                    # 2. 上传云端
-                    status_text.markdown("**正在上传至 Google Gemini 云端大脑...**")
-                    prog_bar.progress(40)
-                    
-                    genai.configure(api_key=api_key)
-                    video_file = genai.upload_file(path=audio_path)
-                    
-                    # 等待 Google 处理完毕
-                    while video_file.state.name == "PROCESSING":
-                        time.sleep(2)
-                        video_file = genai.get_file(video_file.name)
-                    
-                    if video_file.state.name == "FAILED":
-                        raise Exception("Google 处理音频失败")
-                        
-                    # 3. AI 生成
-                    status_text.markdown("**AI 正在听写、翻译并校对时间轴 (LingOrm 模式)...**")
-                    prog_bar.progress(60)
-                    
-                    prompt = f"""
-                    你是一个精通泰语的字幕组翻译。请处理这段音频。
-                    【角色】A: {role_1}({role_1_cn}), B: {role_2}({role_2_cn})。Phi Ling译为{role_1_cn}。
-                    【要求】输出SRT格式。口语化甜美风。多人对话在文本前加名字。
-                    【过滤】忽略BGM、噪音、幻觉词({",".join(blacklist)})。
-                    【格式】直接输出SRT内容，不要代码块标记。
-                    """
-                    
-                    # 调用双保险函数
-                    response = get_gemini_response(video_file, prompt)
-                    
-                    prog_bar.progress(100)
-                    status_text.markdown("✅ **生成完成！**")
-                    
-                    # 4. 结果展示
-                    srt_content = response.text.replace("```srt", "").replace("```", "").strip()
-                    
-                    st.balloons() # 撒花
-                    
-                    st.markdown("### 🎉 字幕结果")
-                    st.text_area("", srt_content, height=250)
-                    
-                    col_dl1, col_dl2 = st.columns([1, 1])
-                    with col_dl1:
-                        st.download_button(
-                            label="📥 下载 SRT 字幕",
-                            data=srt_content,
-                            file_name=f"{Path(uploaded_file.name).stem}_LingOrm.srt",
-                            mime="text/plain"
-                        )
-                    
-                except Exception as e:
-                    st.error(f"出错啦: {e}")
-                finally:
-                    # 清理垃圾文件
-                    if audio_path and os.path.exists(audio_path): 
-                        os.remove(audio_path)
-                    if os.path.exists(tmp_video_path): 
-                        os.remove(tmp_video_path)
+                # 步骤 2
+                status_container.info("☁️ Uploading to Gemini... (正在连接云端大脑)")
+                genai.configure(api_key=api_key)
+                video_file = genai.upload_file(path=audio_path)
+                
+                while video_file.state.name == "PROCESSING":
+                    time.sleep(2)
+                    video_file = genai.get_file(video_file.name)
+                
+                if video_file.state.name == "FAILED": raise Exception("Audio Processing Failed")
 
-# 底部版权
-st.markdown("<div style='text-align: center; margin-top: 50px; color: #aaa; font-size: 0.8em;'>Made with 💜 by LingOrm Fans</div>", unsafe_allow_html=True)
+                # 步骤 3
+                status_container.info("💜 AI Listening & Translating... (正在嗑糖并翻译中)")
+                
+                prompt = f"""
+                你是一个精通泰语的字幕组翻译。请处理这段音频。
+                【角色】A: {role_1}({role_1_cn}), B: {role_2}({role_2_cn})。Phi Ling译为{role_1_cn}。
+                【要求】输出SRT格式。口语化甜美风。多人对话在文本前加名字。
+                【过滤】忽略BGM、噪音、幻觉词({",".join(blacklist)})。
+                """
+                
+                response = get_gemini_response(video_file, prompt)
+                srt_content = response.text.replace("```srt", "").replace("```", "").strip()
+
+                # 完成状态
+                status_container.success("✨ Completed! The Secret is Revealed.")
+                st.balloons()
+
+                # 毛玻璃容器 2: 结果展示
+                st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+                st.text_area("SRT Result", srt_content, height=300, label_visibility="collapsed")
+                st.markdown("</div>", unsafe_allow_html=True)
+
+                col1, col2 = st.columns([1,1])
+                with col1:
+                    st.download_button(
+                        label="📥 Download .SRT",
+                        data=srt_content,
+                        file_name=f"{Path(uploaded_file.name).stem}_LingOrm.srt",
+                        mime="text/plain"
+                    )
+
+            except Exception as e:
+                st.error(f"Error: {e}")
+            finally:
+                if audio_path and os.path.exists(audio_path): os.remove(audio_path)
+                if os.path.exists(tmp_video_path): os.remove(tmp_video_path)
+
+# 页脚
+st.markdown("""
+<div style='text-align: center; margin-top: 50px; opacity: 0.6;'>
+    <p style='font-size: 0.8rem;'>Made with 💜 for 🦋 & 🐶</p>
+</div>
+""", unsafe_allow_html=True)
