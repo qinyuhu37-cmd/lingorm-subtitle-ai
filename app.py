@@ -109,6 +109,14 @@ st.markdown("""
         background-color: #7C3AED;
     }
 
+    /* 文本域样式 */
+    .stTextArea textarea {
+        background-color: #F9FAFB;
+        border: 1px solid #E5E7EB;
+        border-radius: 12px;
+        font-family: monospace;
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -176,7 +184,7 @@ with st.container():
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 6. 执行逻辑 ---
+# --- 6. 执行逻辑 (完整修复版) ---
 if generate_btn and uploaded_file:
     # 检查 Key 是否存在
     if not API_KEY:
@@ -187,46 +195,99 @@ if generate_btn and uploaded_file:
         progress_bar = st.progress(0)
         
         # 临时文件处理
-        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            tmp_video_path = tmp_file.name
-        
+        tmp_video_path = None
         audio_path = None
         
         try:
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                tmp_video_path = tmp_file.name
+            
             # 步骤 1: 提取音频
             status_msg.markdown("**🎧 Extracting Audio Stream...**")
             progress_bar.progress(20)
             
-            audio_path = tmp_video_path.replace(Path(tmp_video_path).suffix, ".mp3")
-            # 降低码率以加快上传
-            cmd = ["ffmpeg", "-i", tmp_video_path, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k", "-y", audio_path]
+            audio_path = tmp_video_path + ".mp3" # 简单命名确保兼容
+            
+            # 使用 ffmpeg 提取音频 (确保环境中有安装 ffmpeg)
+            cmd = [
+                "ffmpeg", "-i", tmp_video_path, 
+                "-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k", 
+                "-y", audio_path
+            ]
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # 步骤 2: 上传
+            # 步骤 2: 上传到 Gemini
             status_msg.markdown("**☁️ Syncing with Gemini Cloud...**")
             progress_bar.progress(40)
             
             genai.configure(api_key=API_KEY)
             video_file = genai.upload_file(path=audio_path)
             
-            # 等待处理
+            # 等待处理完成 (必须步骤)
             while video_file.state.name == "PROCESSING":
-                time.sleep(1)
+                time.sleep(2)
                 video_file = genai.get_file(video_file.name)
             
-            if video_file.state.name == "FAILED": raise Exception("Google Audio Processing Failed")
+            if video_file.state.name == "FAILED":
+                raise Exception("Google Audio Processing Failed")
 
-            # 步骤 3: 生成
+            # 步骤 3: 构造 Prompt 并生成 (修复了这里的 SyntaxError)
             status_msg.markdown("**💜 Analyzing & Translating (The Secret Voice)...**")
-            progress_bar.progress(70)
+            progress_bar.progress(60)
             
-            # --- 修复点：这里是完整的 Prompt ---
             prompt = f"""
             Task: Transcribe and translate the audio to Simplified Chinese Subtitles (SRT format).
             Context: A sweet conversation between two Thai girls, {role_1} and {role_2}.
             
             Rules:
             1. Speaker Identification: Mark "{role_1_cn}:" or "{role_2_cn}:" at the start of dialogue.
-            2. Terminology: "Phi Ling" -> "{role_1_cn}".
-            3. Tone: Casual, sweet,
+            2. Terminology: "Phi Ling" -> "{role_1_cn}", "Nong Orm" -> "{role_2_cn}".
+            3. Tone: Casual, sweet, romantic style.
+            4. Filter: Do not translate or transcribe words listed here: {', '.join(blacklist)}.
+            5. Format: Output ONLY valid SRT format. No markdown code blocks, no intro text.
+            """
+            
+            # 调用 AI
+            response = get_gemini_response(video_file, prompt, API_KEY)
+            subtitle_text = response.text
+            
+            # 清理云端文件
+            try:
+                video_file.delete()
+            except:
+                pass
+
+            # 步骤 4: 结果展示
+            progress_bar.progress(100)
+            status_msg.success("✨ Magic Happened! Subtitle Generated.")
+            
+            st.markdown('<div class="clean-card">', unsafe_allow_html=True)
+            st.markdown("##### 📝 Subtitle Preview")
+            
+            # 文本展示
+            st.text_area("SRT Content", subtitle_text, height=300, label_visibility="collapsed")
+            
+            # 下载按钮
+            col_d1, col_d2 = st.columns([1, 2])
+            with col_d1:
+                st.download_button(
+                    label="📥 Download .SRT",
+                    data=subtitle_text,
+                    file_name=f"{Path(uploaded_file.name).stem}_LingOrm.srt",
+                    mime="text/plain"
+                )
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        except subprocess.CalledProcessError:
+            st.error("❌ FFmpeg Error: Failed to extract audio. Please check if ffmpeg is installed.")
+        except Exception as e:
+            st.error(f"❌ Error: {str(e)}")
+        
+        finally:
+            # 清理本地临时文件
+            if tmp_video_path and os.path.exists(tmp_video_path):
+                os.remove(tmp_video_path)
+            if audio_path and os.path.exists(audio_path):
+                os.remove(audio_path)
