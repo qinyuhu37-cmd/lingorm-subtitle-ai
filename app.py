@@ -54,51 +54,66 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. 核心逻辑：强制使用 Flash + 自动重试 ---
+# --- 3. 核心逻辑：智能模型匹配 (彻底解决 404 和 429) ---
 
-def generate_with_retry(file_obj, prompt, api_key):
+def get_valid_flash_model(api_key):
     """
-    稳健的生成函数：
-    1. 强制使用 gemini-1.5-flash (免费层额度最高)
-    2. 如果遇到 429 错误，自动等待并重试
+    1. 获取当前 Key 能用的所有模型。
+    2. 只筛选出 'flash' 系列 (速度快、配额高)。
+    3. 排除掉 '8b' 这种不稳定版本 (除非只有它)。
     """
     genai.configure(api_key=api_key)
-    
-    # 强制指定模型列表，不再动态探测
-    # 优先级：Flash (标准) -> Flash-001 (备用) -> Flash-8b (轻量)
-    safe_models = ["gemini-1.5-flash", "gemini-1.5-flash-001", "gemini-1.5-flash-8b"]
-    
-    last_exception = None
+    try:
+        available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                available_models.append(m.name)
+        
+        # 筛选逻辑：必须包含 flash，且优先选择 1.5-flash
+        flash_models = [m for m in available_models if "flash" in m]
+        
+        # 如果找不到 flash，才退而求其次找 pro
+        if not flash_models:
+            pro_models = [m for m in available_models if "pro" in m]
+            if pro_models:
+                return pro_models[0] # 返回第一个能用的 pro
+            else:
+                return "gemini-1.5-flash" # 最后的保底，虽然可能不存在
+        
+        # 在 Flash 模型中，优先找标准版，排除 experimental 或 8b
+        # 排序：让名字短的排前面 (gemini-1.5-flash 优于 gemini-1.5-flash-001)
+        flash_models.sort(key=len)
+        
+        return flash_models[0] # 返回最标准的那个 Flash 模型名称
 
-    for model_name in safe_models:
-        # 重试机制：每个模型尝试 2 次
-        for attempt in range(2):
-            try:
-                # st.toast(f"Trying {model_name} (Attempt {attempt+1})...", icon="🤖")
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content([file_obj, prompt], request_options={"timeout": 600})
-                return response.text, model_name
-                
-            except Exception as e:
-                error_str = str(e)
-                last_exception = e
-                
-                # 如果是 429 (Too Many Requests) 或 Quota Exceeded
-                if "429" in error_str or "quota" in error_str.lower():
-                    wait_time = 5 * (attempt + 1) # 第一次等5秒，第二次等10秒
-                    st.warning(f"⚠️ High traffic (429). Cooling down for {wait_time}s...")
-                    time.sleep(wait_time)
-                    continue # 重试当前模型
-                
-                # 如果是 404 (模型未找到)，直接跳出当前循环，尝试下一个模型
-                if "404" in error_str:
-                    break 
-                
-                # 其他错误，记录并继续
-                print(f"Error with {model_name}: {e}")
+    except Exception as e:
+        # 如果列出模型失败，直接返回硬编码的最稳模型
+        return "gemini-1.5-flash"
 
-    # 如果所有尝试都失败
-    raise last_exception
+def generate_safe(file_obj, prompt, model_name):
+    """
+    带重试机制的生成
+    """
+    # 最多重试 3 次
+    for attempt in range(3):
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content([file_obj, prompt], request_options={"timeout": 600})
+            return response.text
+        except Exception as e:
+            error_str = str(e).lower()
+            
+            # 如果是 429 (Quota/Resource Exhausted)
+            if "429" in error_str or "quota" in error_str or "exhausted" in error_str:
+                wait_time = 10 * (attempt + 1) # 10秒, 20秒, 30秒
+                st.warning(f"⚠️ Google API is busy (Traffic Limit). Cooling down for {wait_time}s... (Attempt {attempt+1}/3)")
+                time.sleep(wait_time)
+                continue # 重试
+            
+            # 如果是其他错误，直接抛出
+            raise e
+            
+    raise Exception("Failed after 3 retries due to busy API.")
 
 # --- 4. 获取 API Key ---
 try:
@@ -152,8 +167,12 @@ if generate_btn and uploaded_file:
         audio_path = None
         
         try:
+            # 0. 确定模型 (关键修复)
+            status_msg.markdown("**🛰️ Finding best available model...**")
+            valid_model_name = get_valid_flash_model(API_KEY)
+            # st.toast(f"Locked on model: {valid_model_name}", icon="🔒")
+            
             # 1. 处理文件
-            status_msg.markdown("**📂 Processing File...**")
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp_file:
                 tmp_file.write(uploaded_file.read())
                 tmp_video_path = tmp_file.name
@@ -179,8 +198,8 @@ if generate_btn and uploaded_file:
             
             if video_file.state.name == "FAILED": raise Exception("Audio Processing Failed")
 
-            # 4. 生成字幕 (调用新写的重试函数)
-            status_msg.markdown(f"**💜 Analyzing & Translating...**")
+            # 4. 生成字幕
+            status_msg.markdown(f"**💜 Analyzing with {valid_model_name}...**")
             progress_bar.progress(60)
             
             prompt = f"""
@@ -194,8 +213,8 @@ if generate_btn and uploaded_file:
             5. Output ONLY valid SRT format. No Markdown blocks.
             """
             
-            # 这里调用带重试的函数
-            subtitle_text, used_model = generate_with_retry(video_file, prompt, API_KEY)
+            # 调用带重试的函数
+            subtitle_text = generate_safe(video_file, prompt, valid_model_name)
             
             # 清理云端文件
             try: video_file.delete()
@@ -203,7 +222,7 @@ if generate_btn and uploaded_file:
 
             # 5. 完成
             progress_bar.progress(100)
-            status_msg.success(f"✨ Magic Happened! (Used model: {used_model})")
+            status_msg.success(f"✨ Magic Happened!")
             
             st.markdown('<div class="clean-card">', unsafe_allow_html=True)
             st.markdown("##### 📝 Subtitle Preview")
@@ -217,7 +236,7 @@ if generate_btn and uploaded_file:
             st.error("❌ FFmpeg Error: Please verify ffmpeg is installed.")
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
-            st.info("💡 Tip: If you see '429' or 'Quota', the API is busy. Wait 1 min and try again.")
+            st.info("💡 如果依然报错，可能是您的 Google API 免费配额已耗尽，请尝试更换一个新的 API Key。")
         
         finally:
             if tmp_video_path and os.path.exists(tmp_video_path): os.remove(tmp_video_path)
