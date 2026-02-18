@@ -120,22 +120,43 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. 核心逻辑 (Flash 极速版) ---
+# --- 3. 核心逻辑 (增强版：自动修复模型名称) ---
 
 def get_gemini_response(file, prompt, api_key):
     """
-    使用 Flash 模型：速度快、不报错、适合字幕
+    智能调用 Gemini：如果 Flash 模型 404，自动尝试 Pro 模型
     """
     genai.configure(api_key=api_key)
-    try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content([file, prompt], request_options={"timeout": 600})
-        return response
-    except Exception as e:
-        raise e
+    
+    # 候选模型列表：优先尝试 Flash (快)，失败则尝试 Pro (稳)
+    # 这里的顺序决定了尝试的优先级
+    candidate_models = [
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash-001",
+        "gemini-1.5-pro",
+        "gemini-1.5-pro-latest",
+        "gemini-pro"
+    ]
+    
+    last_error = None
+    
+    for model_name in candidate_models:
+        try:
+            # print(f"Trying model: {model_name}...") # Debug用
+            model = genai.GenerativeModel(model_name)
+            # 尝试生成
+            response = model.generate_content([file, prompt], request_options={"timeout": 600})
+            return response
+        except Exception as e:
+            # 如果是 404 或其他错误，记录下来并尝试下一个模型
+            last_error = e
+            continue
+            
+    # 如果所有模型都失败了，抛出最后一个错误
+    raise last_error
 
 # --- 4. 自动获取 API Key ---
-# 优先从 Secrets 获取 (如果不设置，则 API_KEY 为 None)
 try:
     API_KEY = st.secrets["GOOGLE_API_KEY"]
 except:
@@ -151,7 +172,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# 主卡片容器 (包含上传和设置)
+# 主卡片容器
 with st.container():
     st.markdown('<div class="clean-card">', unsafe_allow_html=True)
     
@@ -161,7 +182,7 @@ with st.container():
     
     st.markdown("---")
     
-    # 2. 设置区 (折叠在主界面下方，不占地方)
+    # 2. 设置区
     with st.expander("⚙️ Advanced Settings (Role Names & Filters)", expanded=False):
         col1, col2 = st.columns(2)
         with col1:
@@ -184,7 +205,7 @@ with st.container():
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 6. 执行逻辑 (完整修复版) ---
+# --- 6. 执行逻辑 ---
 if generate_btn and uploaded_file:
     # 检查 Key 是否存在
     if not API_KEY:
@@ -208,9 +229,9 @@ if generate_btn and uploaded_file:
             status_msg.markdown("**🎧 Extracting Audio Stream...**")
             progress_bar.progress(20)
             
-            audio_path = tmp_video_path + ".mp3" # 简单命名确保兼容
+            audio_path = tmp_video_path + ".mp3"
             
-            # 使用 ffmpeg 提取音频 (确保环境中有安装 ffmpeg)
+            # 使用 ffmpeg 提取音频
             cmd = [
                 "ffmpeg", "-i", tmp_video_path, 
                 "-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k", 
@@ -225,7 +246,7 @@ if generate_btn and uploaded_file:
             genai.configure(api_key=API_KEY)
             video_file = genai.upload_file(path=audio_path)
             
-            # 等待处理完成 (必须步骤)
+            # 等待处理完成
             while video_file.state.name == "PROCESSING":
                 time.sleep(2)
                 video_file = genai.get_file(video_file.name)
@@ -233,7 +254,7 @@ if generate_btn and uploaded_file:
             if video_file.state.name == "FAILED":
                 raise Exception("Google Audio Processing Failed")
 
-            # 步骤 3: 构造 Prompt 并生成 (修复了这里的 SyntaxError)
+            # 步骤 3: 构造 Prompt 并生成
             status_msg.markdown("**💜 Analyzing & Translating (The Secret Voice)...**")
             progress_bar.progress(60)
             
@@ -249,7 +270,7 @@ if generate_btn and uploaded_file:
             5. Format: Output ONLY valid SRT format. No markdown code blocks, no intro text.
             """
             
-            # 调用 AI
+            # 调用 AI (此处会自动重试多个模型，解决 404 问题)
             response = get_gemini_response(video_file, prompt, API_KEY)
             subtitle_text = response.text
             
