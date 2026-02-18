@@ -1,5 +1,3 @@
-
-
 import streamlit as st
 import google.generativeai as genai
 import tempfile
@@ -29,7 +27,7 @@ st.markdown("""
         color: #1F2937;
     }
 
-    /* 隐藏杂项 */
+    /* 隐藏 Streamlit 原生杂项 */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -129,7 +127,7 @@ def get_gemini_response(file, prompt, api_key):
         raise e
 
 # --- 4. 自动获取 API Key ---
-# 优先从 Secrets 获取 (如果不设置，则提示错误)
+# 优先从 Secrets 获取 (如果不设置，则 API_KEY 为 None)
 try:
     API_KEY = st.secrets["GOOGLE_API_KEY"]
 except:
@@ -180,16 +178,15 @@ with st.container():
 
 # --- 6. 执行逻辑 ---
 if generate_btn and uploaded_file:
+    # 检查 Key 是否存在
     if not API_KEY:
         st.error("🔒 错误：未配置 API Key。请在 Streamlit Secrets 中配置 GOOGLE_API_KEY。")
     else:
         # 状态显示
-        status_container = st.empty()
         status_msg = st.empty()
-        
-        # 进度条
         progress_bar = st.progress(0)
-
+        
+        # 临时文件处理
         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp_file:
             tmp_file.write(uploaded_file.read())
             tmp_video_path = tmp_file.name
@@ -224,7 +221,7 @@ if generate_btn and uploaded_file:
             status_msg.markdown("**💜 Analyzing & Translating (The Secret Voice)...**")
             progress_bar.progress(70)
             
-            # 修复后的 Prompt
+            # --- 修复点：这里是完整的 Prompt ---
             prompt = f"""
             Task: Transcribe and translate the audio to Simplified Chinese Subtitles (SRT format).
             Context: A sweet conversation between two Thai girls, {role_1} and {role_2}.
@@ -232,5 +229,4 @@ if generate_btn and uploaded_file:
             Rules:
             1. Speaker Identification: Mark "{role_1_cn}:" or "{role_2_cn}:" at the start of dialogue.
             2. Terminology: "Phi Ling" -> "{role_1_cn}".
-            3. Tone: Casual, sweet, close relationship (CP fans perspective).
-            4. Filter: Ignore background music
+            3. Tone: Casual, sweet,
